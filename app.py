@@ -9,10 +9,11 @@ import numpy as np
 
 # ----- PRIMER PASO: INTERFAZ -----
 st.set_page_config(page_title="Análisis Proyecto de Vivienda", layout="wide")
-st.title("🏗️ Análisis Interactivo de Proyectos de Vivienda")
+st.title("FinSight")
+st.subheader("Visualiza, proyecta y evalúa la viabilidad financiera de tu desarrollo inmobiliario.")
 
 # ----- SEGUNDO PASO: FUNCIÓN DE CÁLCULO DE RATIOS -----
-def calcular_indicadores_resumen(df):
+def calcular_indicadores_resumen(df): #se converte en formato largo 
     tabla = df.pivot_table(index=['PROYECTO', 'CIUDAD'], 
                            columns='METRICAS', 
                            values='VALOR', 
@@ -20,8 +21,9 @@ def calcular_indicadores_resumen(df):
 
     for col in tabla.columns:
         if col not in ['PROYECTO', 'CIUDAD']:
-            tabla[col] = pd.to_numeric(tabla[col], errors='coerce')
+            tabla[col] = pd.to_numeric(tabla[col], errors='coerce') #se asegura de leer todo en formato numero 
 
+    #calculo de indicadores financieros 
     tabla['GASTOS_INDIRECTOS'] = tabla[[
         'COMISIONES', 'CONSTRUCT_FEE', 'MNG_FEE', 'SALES_FEE', 'MONITOR_FEE',
         'DESING_FEE', 'ESTRUCTURACION', 'INDIRECTOS'
@@ -34,7 +36,7 @@ def calcular_indicadores_resumen(df):
     tabla['MARGEN_NETO'] = tabla['UT_NETA'] / tabla['VENTAS']
     tabla['ROI'] = tabla['UT_NETA'] / (tabla['COSTOS'] + tabla['LOTE'] + tabla['GASTOS_INDIRECTOS'])
 
-    resumen = tabla[[
+    resumen = tabla[[ #indicadores clave 
         'PROYECTO', 'UT_BRUTA', 'UT_OPERATIVA', 'EBITDA',
         'UT_NETA', 'MARGEN_NETO', 'ROI'
     ]]
@@ -43,7 +45,7 @@ def calcular_indicadores_resumen(df):
 
 
 
-# Subida de archivo CSV
+# Subida de archivo .xlsx
 uploaded_file = st.file_uploader("📂 Carga tu archivo .xlsx con la base del proyecto", type=["xlsx"])
 
 # Si el archivo se carga, lo leemos y mostramos
@@ -51,8 +53,8 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     st.success("✅ Archivo cargado con éxito.")
     
-    st.subheader("🔍 Vista previa de los datos:")
-    st.dataframe(df.head())
+    st.subheader("Vista previa de los datos:")
+    st.dataframe(df, use_container_width=True, height=500) #lista desplegable
 
     st.subheader("Indicadores clave del proyecto")
     resultados, tabla_completa = calcular_indicadores_resumen(df)
@@ -81,10 +83,10 @@ if uploaded_file is not None:
     col3.metric("ROI", roi)
 
     col4, col5 = st.columns(2)
-    col4.metric("⚙️ Utilidad Operativa", ut_operativa)
-    col5.metric("📦 EBITDA", ebitda)
+    col4.metric("Utilidad Operativa", ut_operativa)
+    col5.metric("EBITDA", ebitda)
 
-    st.markdown("### 🧪 Simulación de Escenarios Financieros")
+    st.markdown("### Simulación de Escenarios Financieros")
 
     # Extraer los datos del proyecto seleccionado desde la tabla completa
     base = tabla_completa[tabla_completa["PROYECTO"] == proyecto_seleccionado].iloc[0]
@@ -94,17 +96,17 @@ if uploaded_file is not None:
         if key not in st.session_state:
             st.session_state[key] = 0
 
-    # Botón para resetear los sliders
+    # Botón para restablecer sliders
     if st.button("🔄 Restablecer valores"):
         st.session_state.ventas_adj = 0
         st.session_state.costos_adj = 0
         st.session_state.indirectos_adj = 0
         st.rerun()
 
-    # Deslizadores para ajustes
-    ventas_adj = st.slider("🔼 Aumento % en Ventas", -30, 50, 0)
-    costos_adj = st.slider("🔽 Variación % en Costos", -50, 30, 0)
-    indirectos_adj = st.slider("🔽 Variación % en Gastos Indirectos", -50, 30, 0)
+    # Sliders que usan el valor actual del session_state
+    ventas_adj = st.slider("🔼 Aumento % en Ventas", -30, 50, key="ventas_adj")
+    costos_adj = st.slider("🔽 Variación % en Costos", -50, 30, key="costos_adj")
+    indirectos_adj = st.slider("🔽 Variación % en Gastos Indirectos", -50, 30, key="indirectos_adj")
 
     # Aplicar ajustes
     ventas_sim = base['VENTAS'] * (1 + ventas_adj / 100)
@@ -157,15 +159,35 @@ if uploaded_file is not None:
         # Construir input para el modelo
         X_proyecto = pd.DataFrame([{col: base[col] for col in columnas_modelo}])
 
-        # Cargar modelo y escalador
+        # Cargar modelo y escalador usado en el entrenamiento
         import joblib
         modelo_rf = joblib.load("modelo_rf.pkl")
         scaler = joblib.load("scaler.pkl")
 
-        # Escalar y predecir
         X_scaled = scaler.transform(X_proyecto)
-        resultado = modelo_rf.predict(X_scaled).item()
-        probabilidad = modelo_rf.predict_proba(X_scaled)[:, 1].item()
+        resultado = modelo_rf.predict(X_scaled).item() #resultado binario (objetivo)
+        probabilidad = modelo_rf.predict_proba(X_scaled)[:, 1].item() #resultado de probabilidad de viabilidad 
+
+        # === IMPORTANCIA DE VARIABLES ===
+
+        # Obtener las importancias de cada variable
+        importancias = modelo_rf.feature_importances_
+        variables = columnas_modelo
+
+        # Crear un DataFrame ordenado
+        df_importancia = pd.DataFrame({
+            'Variable': variables,
+            'Importancia': importancias
+        }).sort_values(by='Importancia', ascending=True)
+
+        # Mostrar como gráfico horizontal de barras
+        st.markdown("### Importancia de Variables en la Predicción")
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.barh(df_importancia['Variable'], df_importancia['Importancia'])
+        ax.set_xlabel("Importancia")
+        ax.set_ylabel("Variable")
+        ax.set_title("Importancia relativa de cada variable en el modelo")
+        st.pyplot(fig)
 
         # Mostrar resultado
         if resultado == 1:
@@ -293,6 +315,5 @@ if uploaded_file is not None:
 
 else:
     st.info("Por favor, carga un archivo xls para comenzar.")
-
 
 
